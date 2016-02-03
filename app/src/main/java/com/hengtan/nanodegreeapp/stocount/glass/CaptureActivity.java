@@ -18,184 +18,128 @@ package com.hengtan.nanodegreeapp.stocount.glass;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.hardware.Camera;
-import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
-import android.util.TypedValue;
-import android.view.KeyEvent;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
-import android.view.View;
-import android.view.Window;
 import android.view.WindowManager;
-import android.widget.TextView;
-import com.google.zxing.Result;
-import com.google.zxing.client.result.ParsedResult;
-import com.google.zxing.client.result.ParsedResultType;
-import com.google.zxing.client.result.ResultParser;
-import com.google.zxing.client.result.TextParsedResult;
-import com.google.zxing.client.result.URIParsedResult;
+import android.widget.Toast;
+
+import com.mirasense.scanditsdk.ScanditSDKBarcodePicker;
+import com.mirasense.scanditsdk.interfaces.ScanditSDK;
+import com.mirasense.scanditsdk.interfaces.ScanditSDKListener;
+import com.mirasense.scanditsdk.interfaces.ScanditSDKOverlay;
 
 import java.io.IOException;
 
 /**
  * @author Sean Owen
  */
-public final class CaptureActivity extends Activity implements SurfaceHolder.Callback {
+public final class CaptureActivity extends Activity implements ScanditSDKListener {
 
   private static final String TAG = CaptureActivity.class.getSimpleName();
-  private static final String SCAN_ACTION = "com.google.zxing.client.android.SCAN";
 
-  private boolean hasSurface;
-  private boolean returnResult;
-  private SurfaceHolder holderWithCallback;
-  private Camera camera;
-  private DecodeRunnable decodeRunnable;
-  private Result result;
+  // the barcode scanner picker
+  private ScanditSDK mBarcodePicker;
 
   @Override
-  public void onCreate(Bundle icicle) {
-    super.onCreate(icicle);
+  protected void onCreate(Bundle bundle) {
+    super.onCreate(bundle);
 
-    // returnResult should be true if activity was started using 
-    // startActivityForResult() with SCAN_ACTION intent
-    Intent intent = getIntent();
-    returnResult = intent != null && SCAN_ACTION.equals(intent.getAction());
+    // Instantiate the default barcode picker
+    ScanditSDKBarcodePicker picker = new ScanditSDKBarcodePicker(this, getString(R.string.scandit_app_key));
 
-    Window window = getWindow();
-    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-    setContentView(R.layout.capture);
+        /*
+        Here, we disable all symbologies detection, except EAN13
+        it frees up CPU resources
+        */
+    picker.set1DScanningEnabled(true);
+    picker.set2DScanningEnabled(false);
+    picker.setCodabarEnabled(false);
+    picker.setCode128Enabled(false);
+    picker.setCode39Enabled(false);
+    picker.setCode93Enabled(false);
+    picker.setDataMatrixEnabled(false);
+    picker.setEan13AndUpc12Enabled(true);
+    picker.setEan8Enabled(false);
+    picker.setGS1DataBarEnabled(false);
+    picker.setGS1DataBarExpandedEnabled(false);
+    picker.setItfEnabled(false);
+    picker.setMicroDataMatrixEnabled(false);
+    picker.setMsiPlesseyEnabled(false);
+    picker.setPdf417Enabled(false);
+    picker.setQrEnabled(false);
+    picker.setUpceEnabled(false);
+    picker.setInverseRecognitionEnabled(false);
+
+        /*
+        We restrict the scanning area and zoom the viewfinder
+         */
+    picker.restrictActiveScanningArea(true);
+    picker.setScanningHotSpotHeight(0.2f);
+    picker.setZoom(0.5f);
+
+    // All we want to show is the scanning view
+    setContentView(picker);
+
+    mBarcodePicker = picker;
+
+    ScanditSDKOverlay mOv = mBarcodePicker.getOverlayView();
+    mOv.addListener(this);
+
+    // We set a small viewfinder according to the scanning area
+    mOv.setViewfinderDimension(0.4f, 0.2f, 0.4f, 0.2f);
+
+    //prevent screen dimming
+    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
   }
 
   @Override
-  public synchronized void onResume() {
+  protected void onResume() {
     super.onResume();
-    SurfaceView surfaceView = (SurfaceView) findViewById(R.id.preview_view);
-    SurfaceHolder surfaceHolder = surfaceView.getHolder();
-    if (surfaceHolder == null) {
-      throw new IllegalStateException("No SurfaceHolder?");
-    }
-    if (hasSurface) {
-      initCamera(surfaceHolder);
-    } else {
-      surfaceHolder.addCallback(this);
-      holderWithCallback = surfaceHolder;
-    }
+    // Once the activity is in the foreground again, restart scanning.
+    mBarcodePicker.startScanning();
   }
 
   @Override
-  public synchronized void onPause() {
-    result = null;
-    if (decodeRunnable != null) {
-      decodeRunnable.stop();
-      decodeRunnable = null;
-    }
-    if (camera != null) {
-      camera.stopPreview();
-      camera.release();
-      camera = null;
-    }
-    if (holderWithCallback != null) {
-      holderWithCallback.removeCallback(this);
-      holderWithCallback = null;
-    }
+  protected void onPause() {
+    // When the activity is in the background immediately stop the
+    // scanning to save resources and free the camera.
+    mBarcodePicker.stopScanning();
     super.onPause();
   }
 
   @Override
-  public synchronized void surfaceCreated(SurfaceHolder holder) {
-    Log.i(TAG, "Surface created");
-    holderWithCallback = null;
-    if (!hasSurface) {
-      hasSurface = true;
-      initCamera(holder);
+  protected void onDestroy() {
+    if (mBarcodePicker != null && mBarcodePicker.isScanning()) {
+      mBarcodePicker.stopScanning();
     }
+
+    super.onDestroy();
   }
 
   @Override
-  public synchronized void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-    // do nothing
+  public void didScanBarcode(String barcode, String symbology) {
+    Log.i(TAG, "(" + symbology + ") " + barcode);
+    if (mBarcodePicker.isScanning()) {
+      mBarcodePicker.stopScanning();
+    }
+
+
+
+ //   Toast.makeText(this,"barcode : "+barcode+ " , type : "+symbology, Toast.LENGTH_SHORT);
+    /*Intent myIntent = new Intent(this, ProductLookupActivity.class);
+    myIntent.putExtra("ScanResult", new ScanResult(barcode, symbology));
+    startActivity(myIntent);
+    */
   }
 
   @Override
-  public synchronized void surfaceDestroyed(SurfaceHolder holder) {
-    Log.i(TAG, "Surface destroyed");
-    holderWithCallback = null;
-    hasSurface = false;
+  public void didCancel() {
+
   }
 
   @Override
-  public boolean onKeyDown(int keyCode, KeyEvent event) {
-    if (result != null) {
-      switch (keyCode) {
-        case KeyEvent.KEYCODE_DPAD_CENTER:
-          handleResult(result);
-          return true;
-        case KeyEvent.KEYCODE_BACK:
-          reset();
-          return true;
-      }
-    }
-    return super.onKeyDown(keyCode, event);
-  }
+  public void didManualSearch(String s) {
 
-  private void initCamera(SurfaceHolder holder) {
-    if (camera != null) {
-      throw new IllegalStateException("Camera not null on initialization");
-    }
-    camera = Camera.open();
-    if (camera == null) {
-      throw new IllegalStateException("Camera is null");
-    }
-
-    CameraConfigurationManager.configure(camera);
-
-    try {
-      camera.setPreviewDisplay(holder);
-      camera.startPreview();
-    } catch (IOException e) {
-      Log.e(TAG, "Cannot start preview", e);
-    }
-
-    decodeRunnable = new DecodeRunnable(this, camera);
-    new Thread(decodeRunnable).start();
-    reset();
-  }
-
-  void setResult(Result result) {
-    if (returnResult) {
-      Intent scanResult = new Intent("com.google.zxing.client.android.SCAN");
-      scanResult.putExtra("SCAN_RESULT", result.getText());
-      setResult(RESULT_OK, scanResult);
-      finish();
-    } else {
-      TextView statusView = (TextView) findViewById(R.id.status_view);
-      String text = result.getText();
-      statusView.setText(text);
-      statusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, Math.max(14, 56 - text.length() / 4));
-      statusView.setVisibility(View.VISIBLE);
-      this.result = result;
-    }
-  }
-
-  private void handleResult(Result result) {
-    ParsedResult parsed = ResultParser.parseResult(result);
-    Intent intent;
-    if (parsed.getType() == ParsedResultType.URI) {
-      intent = new Intent(Intent.ACTION_VIEW, Uri.parse(((URIParsedResult) parsed).getURI()));
-    } else {
-      intent = new Intent(Intent.ACTION_WEB_SEARCH);
-      intent.putExtra("query", ((TextParsedResult) parsed).getText());
-    }
-    startActivity(intent);
-  }
-
-  private synchronized void reset() {
-    TextView statusView = (TextView) findViewById(R.id.status_view);
-    statusView.setVisibility(View.GONE);
-    result = null;
-    decodeRunnable.startScanning();
   }
 
 }

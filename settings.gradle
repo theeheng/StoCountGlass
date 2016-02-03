@@ -1,1 +1,1 @@
-include ':app', ':zxing',':glass-barcode'
+include ':app'
